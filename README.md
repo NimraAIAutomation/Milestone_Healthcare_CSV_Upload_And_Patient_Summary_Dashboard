@@ -91,6 +91,7 @@ Each patient's values come from their most recent recorded reading. If the lates
 ## Screenshots
 ### Wireframe
 <img width="600" height="960" alt="wireframe" src="https://github.com/user-attachments/assets/69b23c6d-b983-4fd1-8cd4-c2d2f22dcd3a" />
+
 ### Actual App
 <img width="1581" height="736" alt="image" src="https://github.com/user-attachments/assets/244d7cbf-fe29-4409-8e47-6d6ed2c7a7bb" />
 
