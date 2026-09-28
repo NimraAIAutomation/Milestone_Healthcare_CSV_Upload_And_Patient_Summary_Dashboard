@@ -1,577 +1,224 @@
-import streamlit as st
+import numpy as np
 import pandas as pd
-import datetime as dt
-from pathlib import Path
-
-st.set_page_config(
-    page_title="Clinical Dashboard",
-    layout="wide"
-)
-# -----------------------------
-# LOAD DATA
-# -----------------------------
-
-DATA_DIR = Path(__file__).resolve().parent / "data"
-
-patients = pd.read_csv(DATA_DIR / "patients.csv")
-encounters = pd.read_csv(DATA_DIR / "encounters.csv")
-observations = pd.read_csv(DATA_DIR / "observations.csv")
-
-# Convert dates
-patients["BIRTHDATE"] = pd.to_datetime(
-    patients["BIRTHDATE"]
-)
-
-encounters["START"] = pd.to_datetime(
-    encounters["START"]
-)
-observations["DATE"] = pd.to_datetime(
-    observations["DATE"]
-)
-
-# Convert values to numeric
-observations["VALUE"] = pd.to_numeric(
-    observations["VALUE"],
-    errors="coerce"
-)
-
-# Remove missing values
-observations = observations.dropna(
-    subset=["VALUE"]
-)
-
-# Calculate age
-today = pd.Timestamp.today()
-
-patients["AGE"] = (
-    today.year - patients["BIRTHDATE"].dt.year
-    - (
-        (
-            patients["BIRTHDATE"].dt.month > today.month
-        )
-        |
-        (
-            (patients["BIRTHDATE"].dt.month == today.month)
-            & (patients["BIRTHDATE"].dt.day > today.day)
-        )
-    ).astype(int)
-)
-# Create patient name
-patients["PATIENT_NAME"] = (
-    patients["FIRST"] + " " + patients["LAST"]
-)
-# -----------------------------
-# PATIENT SELECTION
-# -----------------------------
-
-patient_options = patients["PATIENT_NAME"].dropna().tolist()
-
-if not patient_options:
-    st.error("No patients found in patients.csv.")
-    st.stop()
-
-if "selected_patient" not in st.session_state:
-    st.session_state.selected_patient = patient_options[0]
-
-selected_patient = st.selectbox(
-    "Select Patient",
-    patient_options,
-    key="selected_patient"
-)
-
-# Get selected patient's data
-patient = patients[
-    patients["PATIENT_NAME"] == selected_patient
-].iloc[0]
-
-# -----------------------------
-# COUNT PATIENT VISITS
-# -----------------------------
-
-total_visits = encounters[
-    encounters["PATIENT"] == patient["Id"]
-].shape[0]
-# -----------------------------
-# SESSION STATE
-# -----------------------------
-
-if "threshold_description" not in st.session_state:
-    st.session_state.threshold_description = "Heart rate"
-
-if "threshold_operator" not in st.session_state:
-    st.session_state.threshold_operator = "Above"
-
-if "threshold_value" not in st.session_state:
-    st.session_state.threshold_value = 80.0
-
-# -----------------------------
-# DASHBOARD TITLE
-# -----------------------------
-
-st.title("Clinical Patient Dashboard")
-
-st.write("Total Patients:", len(patients))
-st.write("Total Encounters:", len(encounters))
-
-# Count patient visits
-total_visits = encounters[
-    encounters["PATIENT"] == patient["Id"]
-].shape[0]
-# -----------------------------
-# PATIENT OBSERVATIONS
-# -----------------------------
-
-patient_id = patient["Id"]
-
-patient_observations = observations[
-    observations["PATIENT"] == patient_id
-].copy()
-
-st.write(
-    "Total Observations:",
-    len(patient_observations)
-)
-# -----------------------------
-# PATIENT INFORMATION CARDS
-# -----------------------------
-
-col1, col2 = st.columns(2)
-
-with col1:
-    st.metric(
-        label="Patient Name",
-        value=patient["PATIENT_NAME"]
-    )
-
-with col2:
-    st.metric(
-        label="Age",
-        value=f"{patient['AGE']} years"
-    )
-
-col3, col4 = st.columns(2)
-
-with col3:
-    st.metric(
-        label="Gender",
-        value=patient["GENDER"]
-    )
-
-with col4:
-    st.metric(
-        label="Total Visits",
-        value=total_visits
-    )
-# -----------------------------
-# DATE FILTER
-# -----------------------------
-
-st.subheader("Filter by Date")
-
-if patient_observations.empty:
-    st.warning("No observations are available for this patient.")
-    st.stop()
-
-min_date = patient_observations["DATE"].min().date()
-max_date = patient_observations["DATE"].max().date()
-
-date_range = st.date_input(
-    "Select Date Range",
-    value=(min_date, max_date),
-    min_value=min_date,
-    max_value=max_date
-)
-# -----------------------------
-# APPLY DATE FILTER
-# -----------------------------
-
-if len(date_range) == 2:
-
-    start_date, end_date = date_range
-
-    filtered_observations = patient_observations[
-        (
-            patient_observations["DATE"].dt.date
-            >= start_date
-        )
-        &
-        (
-            patient_observations["DATE"].dt.date
-            <= end_date
-        )
-    ].copy()
-
-else:
-
-    filtered_observations = patient_observations.copy()
-
-    
-# -----------------------------
-# LATEST VITALS
-# -----------------------------
-
-def get_latest_value(df, description):
-
-    data = df[
-        df["DESCRIPTION"] == description
-    ].sort_values("DATE")
-
-    if data.empty:
-        return None, None
-
-    latest = data.iloc[-1]
-
-    return latest["VALUE"], latest["DATE"]
-
-
-latest_systolic, systolic_date = get_latest_value(
-    filtered_observations,
-    "Systolic Blood Pressure"
-)
-
-latest_diastolic, diastolic_date = get_latest_value(
-    filtered_observations,
-    "Diastolic Blood Pressure"
-)
-
-latest_glucose, glucose_date = get_latest_value(
-    filtered_observations,
-    "Glucose [Mass/volume] in Blood"
-)
-# -----------------------------
-# LATEST VITAL SUMMARY
-# -----------------------------
-
-st.subheader("Latest Vital Measurements")
-
-col1, col2 = st.columns(2)
-
-with col1:
-
-    st.metric(
-        label="Latest Systolic BP",
-        value=(
-            f"{latest_systolic:.0f} mmHg"
-            if latest_systolic is not None
-            else "N/A"
-        )
-    )
-
-with col2:
-
-    st.metric(
-        label="Latest Diastolic BP",
-        value=(
-            f"{latest_diastolic:.0f} mmHg"
-            if latest_diastolic is not None
-            else "N/A"
-        )
-    )
-
-col3, col4 = st.columns(2)
-
-with col3:
-
-    st.metric(
-        label="Latest Glucose",
-        value=(
-            f"{latest_glucose:.1f} mg/dL"
-            if latest_glucose is not None
-            else "N/A"
-        )
-    )
-
-with col4:
-
-    latest_dates = [
-        d for d in [
-            systolic_date,
-            diastolic_date,
-            glucose_date
-        ]
-        if d is not None
-    ]
-
-    latest_date = max(latest_dates) if latest_dates else None
-
-    st.metric(
-        label="Last Measurement",
-        value=(
-            latest_date.strftime("%Y-%m-%d")
-            if latest_date is not None
-            else "N/A"
-        )
-    )
-
-# -----------------------------
-# THRESHOLD FILTER
-# -----------------------------
-
-st.subheader("Vital / Laboratory Threshold Filter")
-
-threshold_options = [
-    {
-        "description": "Heart rate",
-        "title": "Heart Rate",
-        "unit": "bpm",
-        "default": 80.0,
-        "min": 40.0,
-        "max": 180.0,
-        "step": 1.0
-    },
-    {
-        "description": "Respiratory rate",
-        "title": "Respiratory Rate",
-        "unit": "breaths/min",
-        "default": 20.0,
-        "min": 5.0,
-        "max": 60.0,
-        "step": 1.0
-    },
-    {
-        "description": "Body Weight",
-        "title": "Body Weight",
-        "unit": "kg",
-        "default": 70.0,
-        "min": 20.0,
-        "max": 200.0,
-        "step": 1.0
-    },
-    {
-        "description": "Body mass index (BMI) [Ratio]",
-        "title": "BMI",
-        "unit": "kg/m²",
-        "default": 25.0,
-        "min": 10.0,
-        "max": 60.0,
-        "step": 0.5
-    },
-    {
-        "description": "Hemoglobin A1c/Hemoglobin.total in Blood",
-        "title": "Hemoglobin A1c",
-        "unit": "%",
-        "default": 5.7,
-        "min": 3.0,
-        "max": 15.0,
-        "step": 0.1
-    },
-    {
-        "description": "Creatinine [Mass/volume] in Blood",
-        "title": "Creatinine",
-        "unit": "mg/dL",
-        "default": 1.0,
-        "min": 0.1,
-        "max": 10.0,
-        "step": 0.1
-    },
-    {
-        "description": "Urea nitrogen [Mass/volume] in Blood",
-        "title": "Blood Urea Nitrogen",
-        "unit": "mg/dL",
-        "default": 20.0,
-        "min": 1.0,
-        "max": 100.0,
-        "step": 1.0
+import streamlit as st
+import altair as alt
+from utils.data_processing import missing_columns, build_vitals, build_summary
+
+st.set_page_config(page_title="Healthcare Patient Dashboard", layout="wide")
+st.title("Healthcare Patient Dashboard")
+st.write("Upload patient records and explore clinical metrics, risk levels, patient details and vital trends.")
+
+CHARTS = {
+    "Blood Pressure": {"cols": {"sbp": "Systolic", "dbp": "Diastolic"}, "refs": [140, 90], "unit": "mm[Hg]"},
+    "Heart rate": {"cols": {"heart_rate": "Heart rate"}, "refs": [100], "unit": "beats/min"},
+    "BMI": {"cols": {"bmi": "BMI"}, "refs": [25, 30], "unit": "kg/m²"},
+    "Glucose": {"cols": {"glucose": "Glucose"}, "refs": [126], "unit": "mg/dL"},
+}
+RISK_COLORS = {  # (background, text)
+    "Low": ("#D4F6D4", "black"),
+    "Medium": ("#FFFFC5", "black"),
+    "High": ("#FFDBE0", "black"),
+}
+
+def style_risk_row(row):
+    bg, fg = RISK_COLORS[row["Risk Level"]]
+    css = f"background-color: {bg}; color: {fg}; font-weight: bold"
+    return [css if c in ("Risk Level") else "" for c in row.index]
+
+# ---------- Sidebar: data ----------
+with st.sidebar:
+    st.header("Data")
+    files = {
+        "patients": st.file_uploader("Patients.csv", type=["csv"]),
+        "encounters": st.file_uploader("Encounters.csv", type=["csv"]),
+        "observations": st.file_uploader("Observations.csv", type=["csv"]),
     }
+
+if not all(files.values()):
+    st.info("Upload all three CSV files in the sidebar to begin.")
+    st.stop()
+
+try:
+    data = {name: pd.read_csv(f) for name, f in files.items()}
+except Exception as e:
+    st.error(f"Could not read one of the files: {e}")
+    st.stop()
+
+errors = {n: missing_columns(df, n) for n, df in data.items() if missing_columns(df, n)}
+if errors:
+    for n, cols in errors.items():
+        st.error(f"{n}.csv is missing columns: {', '.join(cols)}")
+    st.stop()
+
+try:
+    vitals = build_vitals(data["observations"])
+    summary = build_summary(data["patients"], data["encounters"], vitals)
+except Exception as e:
+    st.error(f"Could not process the data: {e}")
+    st.stop()
+
+def reset_filters():
+    st.session_state.risk_filter = "All"
+    st.session_state.risk_threshold = 0.5
+    st.session_state.selected_vital = "All vitals"
+    st.session_state.pop("selected_patient", None)
+
+# ---------- Sidebar: filters ----------
+with st.sidebar:
+    st.caption(f"Glucose found for {summary['glucose'].notna().sum()} of {len(summary)} patients")
+    st.header("Filters")
+    level_filter = st.selectbox("Risk Level", ["All", "Low", "Medium", "High"], key="risk_filter")
+    threshold = st.slider("Risk Threshold (High if score ≥)", 0.25, 1.0, 0.5, 0.05, key="risk_threshold")
+    st.button("Reset filters", on_click=reset_filters)
+
+summary["risk_level"] = np.where(
+    summary["risk_score"] >= threshold, "High",
+    np.where(summary["risk_score"] < 0.25, "Low", "Medium"),
+)
+filtered = summary if level_filter == "All" else summary[summary["risk_level"] == level_filter]
+
+if filtered.empty:
+    st.warning("No patients match the current filter.")
+    st.stop()
+
+# ---------- Sidebar: patient + vital ----------
+names = filtered.set_index("PATIENT")["name"]
+
+with st.sidebar:
+    st.header("Patient")
+    patient_id = st.selectbox(
+        "Select patient", names.index, format_func=lambda i: names[i], key="selected_patient"
+    )
+    st.header("Vital to Display")
+    vital_label = st.selectbox("Vital", ["All vitals"] + list(CHARTS), key="selected_vital")
+
+# ---------- Top metric cards ----------
+st.subheader("Top Metric Cards")
+cards = [
+    ("Total Patients", len(filtered)),
+    ("Total Visits", int(filtered["encounters"].sum())),
+    ("High Risk", int((filtered["risk_level"] == "High").sum())),
+    ("Avg Risk Score", f"{filtered['risk_score'].mean():.2f}"),
 ]
-# Select vital/laboratory measurement
+slots = st.columns(2) + st.columns(2)
+for slot, (label, value) in zip(slots, cards):
+    with slot.container(border=True):
+        st.metric(label, value)
 
-selected_threshold = st.selectbox(
-    "Select Measurement",
-    threshold_options,
-    format_func=lambda x: x["title"],
-    key="threshold_measurement"
+# ---------- Risk distribution ----------
+st.subheader("Risk Distribution")
+dist = (
+    filtered["risk_level"]
+    .value_counts()
+    .reindex(["Low", "Medium", "High"], fill_value=0)
+    .rename_axis("Risk Level")
+    .reset_index(name="Patients")
 )
+with st.container(border=True):
+    bars = alt.Chart(dist).mark_bar().encode(
+        x=alt.X("Risk Level:N", sort=["Low", "Medium", "High"], title=None),
+        y=alt.Y("Patients:Q", title="Patients"),
+        color=alt.Color(
+            "Risk Level:N",
+            scale=alt.Scale(
+                domain=["Low", "Medium", "High"],
+                range=[RISK_COLORS[k][0] for k in ("Low", "Medium", "High")],
+            ),
+            legend=None,
+        ),
+        tooltip=["Risk Level:N", "Patients:Q"],
+    )
+    st.altair_chart(bars, use_container_width=True)
 
-# Select filter condition
 
-operator = st.radio(
-    "Condition",
-    ["Above", "Below"],
-    horizontal=True,
-    key="threshold_operator"
-)
-# Threshold slider
+# ---------- Patient summary table ----------
+def fmt_bp(r):
+    return f"{r['sbp']:.0f}/{r['dbp']:.0f}" if pd.notna(r["sbp"]) and pd.notna(r["dbp"]) else "N/A"
 
-threshold = st.slider(
-    f"Threshold ({selected_threshold['unit']})",
-    min_value=selected_threshold["min"],
-    max_value=selected_threshold["max"],
-    value=selected_threshold["default"],
-    step=selected_threshold["step"],
-    key="threshold_slider"
-)
-# -----------------------------
-# APPLY THRESHOLD FILTER
-# -----------------------------
+table = filtered.copy()
+table["BP"] = table.apply(fmt_bp, axis=1)
+table = table[["name", "GENDER", "age", "BP", "glucose", "risk_score", "risk_level"]]
+table.columns = ["Name", "Sex", "Age", "BP", "Glucose", "Risk Score", "Risk Level"]
 
-threshold_data = filtered_observations[
-    filtered_observations["DESCRIPTION"]
-    == selected_threshold["description"]
-].copy()
+st.subheader("Patient Summary Table")
+with st.container(border=True):
+    styled = table.style.apply(style_risk_row, axis=1).format(
+        {"Risk Score": "{:.2f}", "Glucose": "{:.0f}"}, na_rep="N/A"
+    )
+    st.dataframe(styled, use_container_width=True, hide_index=True)
 
-if operator == "Above":
+# ---------- Patient details ----------
 
-    threshold_data = threshold_data[
-        threshold_data["VALUE"] > threshold
-    ]
+row = filtered[filtered["PATIENT"] == patient_id].iloc[0]
+hr = f"{row['heart_rate']:.0f}" if pd.notna(row["heart_rate"]) else "N/A"
+bmi = f"{row['bmi']:.1f}" if pd.notna(row["bmi"]) else "N/A"
+glu = f"{row['glucose']:.0f}" if pd.notna(row["glucose"]) else "N/A"
 
-else:
-
-    threshold_data = threshold_data[
-        threshold_data["VALUE"] < threshold
-    ]
-# -----------------------------
-# THRESHOLD RESULTS
-# -----------------------------
-
-st.subheader("Threshold Results")
-
-st.write(
-    f"{selected_threshold['title']} "
-    f"{operator.lower()} "
-    f"{threshold} {selected_threshold['unit']}"
-)
-
-st.metric(
-    "Matching Measurements",
-    len(threshold_data)
-)
-if threshold_data.empty:
-
-    st.info(
-        "No measurements match the selected threshold."
+st.subheader("Patient Details")
+with st.container(border=True):
+    d1, d2, d3 = st.columns(3)
+    d1.write(f"**Name:** {row['name']}")
+    d1.write(f"**Sex:** {row['GENDER']}")
+    d1.write(f"**Age:** {row['age']}")
+    d2.write(f"**Latest BP:** {fmt_bp(row)}")
+    d2.write(f"**Latest Glucose:** {glu}")
+    d2.write(f"**Latest Heart Rate:** {hr}")
+    d3.write(f"**Latest BMI:** {bmi}")
+    d3.write(f"**Risk Score:** {row['risk_score']:.2f}")
+    bg, fg = RISK_COLORS[row["risk_level"]]
+    d3.markdown(
+        f"**Risk Level:** <span style='background:{bg};color:{fg};padding:2px 10px;"
+        f"border-radius:10px;font-weight:bold'>{row['risk_level']}</span>",
+        unsafe_allow_html=True,
+    )
+st.download_button(
+        "Download filtered table (CSV)",
+        table.to_csv(index=False).encode("utf-8"),
+        file_name="patient_summary.csv",
+        mime="text/csv",
     )
 
-else:
-
+# ---------- Visiting history ----------
+st.subheader("Visiting History")
+visits = data["encounters"]
+visits = visits[visits["PATIENT"] == patient_id].sort_values("START", ascending=False)
+with st.container(border=True):
     st.dataframe(
-        threshold_data[
-            [
-                "DATE",
-                "DESCRIPTION",
-                "VALUE",
-                "UNITS"
-            ]
-        ].sort_values(
-            "DATE",
-            ascending=False
-        ),
-        use_container_width=True
-    )
-# -----------------------------
-# THRESHOLD TREND
-# -----------------------------
-
-st.subheader(
-    f"{selected_threshold['title']} - Threshold Trend"
-)
-
-if threshold_data.empty:
-
-    st.info(
-        "No data available for the selected threshold."
+        visits[["START", "ENCOUNTERCLASS", "DESCRIPTION", "REASONDESCRIPTION"]],
+        use_container_width=True,
+        hide_index=True,
     )
 
+# ---------- Vitals charts ----------
+st.subheader("Visualization Of Vitals Over Time")
+pv = vitals[vitals["PATIENT"] == patient_id].set_index("DATE")
+
+
+def draw(label, container):
+    cfg = CHARTS[label]
+    df = pv.reset_index()[["DATE", *cfg["cols"]]].rename(columns=cfg["cols"])
+    df = df.melt("DATE", var_name="Measure", value_name="Value").dropna()
+
+    container.markdown(f"**{label}** ({cfg['unit']})")
+    if df.empty:
+        container.info("No readings for this patient.")
+        return
+
+    line = alt.Chart(df).mark_line(point=True).encode(
+        x=alt.X("DATE:T", title="Visit date"),
+        y=alt.Y("Value:Q", title=cfg["unit"], scale=alt.Scale(zero=False)),
+        color=alt.Color("Measure:N", title=None),
+        tooltip=["DATE:T", "Measure:N", "Value:Q"],
+    )
+    rules = alt.Chart(pd.DataFrame({"y": cfg["refs"]})).mark_rule(
+        strokeDash=[4, 4], color="red"
+    ).encode(y="y:Q")
+    container.altair_chart(line + rules, use_container_width=True)
+
+
+if vital_label == "All vitals":
+    grid = st.columns(2)
+    for i, label in enumerate(CHARTS):
+        draw(label, grid[i % 2])
 else:
-
-    st.line_chart(
-        threshold_data.set_index("DATE")["VALUE"],
-        y_label=(
-            f"{selected_threshold['title']} "
-            f"({selected_threshold['unit']})"
-        ),
-        x_label="Date"
-    )
-
-# -----------------------------
-# REUSABLE VITAL GRAPH
-# -----------------------------
-
-def show_vital_graph(
-    df,
-    description,
-    title,
-    y_label
-):
-
-    data = df[
-        df["DESCRIPTION"] == description
-    ].copy()
-
-    data = data.sort_values("DATE")
-
-    if data.empty:
-
-        st.info(
-            f"No {title} data available."
-        )
-
-    else:
-
-        st.line_chart(
-            data.set_index("DATE")["VALUE"],
-            y_label=y_label,
-            x_label="Date"
-        )
-# -----------------------------
-# ADDITIONAL VITAL GRAPHS
-# -----------------------------
-
-st.subheader("Additional Vital Trends")
-
-show_vital_graph(
-    filtered_observations,
-    "Heart rate",
-    "Heart Rate",
-    "bpm"
-)
-
-show_vital_graph(
-    filtered_observations,
-    "Respiratory rate",
-    "Respiratory Rate",
-    "breaths/min"
-)
-
-show_vital_graph(
-    filtered_observations,
-    "Body Weight",
-    "Body Weight",
-    "kg"
-)
-
-show_vital_graph(
-    filtered_observations,
-    "Body mass index (BMI) [Ratio]",
-    "BMI",
-    "kg/m²"
-)
-
-# -----------------------------
-# LABORATORY TRENDS
-# -----------------------------
-
-st.subheader("Laboratory Trends")
-
-show_vital_graph(
-    filtered_observations,
-    "Hemoglobin A1c/Hemoglobin.total in Blood",
-    "Hemoglobin A1c",
-    "%"
-)
-
-show_vital_graph(
-    filtered_observations,
-    "Creatinine [Mass/volume] in Blood",
-    "Creatinine",
-    "mg/dL"
-)
-
-show_vital_graph(
-    filtered_observations,
-    "Urea nitrogen [Mass/volume] in Blood",
-    "Blood Urea Nitrogen",
-    "mg/dL"
-)
-
+    draw(vital_label, st)
